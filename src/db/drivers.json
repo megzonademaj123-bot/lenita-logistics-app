@@ -1,0 +1,29 @@
+[
+  {
+    "id": 1,
+    "name": "Gzim Kelmendi",
+    "license_number": "X1234567Y",
+    "phone": "+355692233445",
+    "age": 45,
+    "salary": 1200,
+    "status": "AVAILABLE"
+  },
+  {
+    "id": 2,
+    "name": "Besnik Hoti",
+    "license_number": "Z9876543A",
+    "phone": "+38349555666",
+    "age": 32,
+    "salary": 1100,
+    "status": "AVAILABLE"
+  },
+  {
+    "id": 3,
+    "name": "Adrian Marku",
+    "license_number": "B1122334C",
+    "phone": "+355681122333",
+    "age": 28,
+    "salary": 1000,
+    "status": "AVAILABLE"
+  }
+]

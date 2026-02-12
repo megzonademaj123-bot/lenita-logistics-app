@@ -1,0 +1,63 @@
+{
+  "trucks": [
+    {
+      "id": 1,
+      "plate": "AA 101 ZZ",
+      "brand": "Volvo",
+      "model": "FH16 500",
+      "chassis_number": "YV2R1234567890123",
+      "year": 2022,
+      "current_km": 154000,
+      "status": "AVAILABLE"
+    },
+    {
+      "id": 2,
+      "plate": "AA 202 XX",
+      "brand": "Mercedes-Benz",
+      "model": "Actros 1845",
+      "chassis_number": "WDB98765432109876",
+      "year": 2021,
+      "current_km": 210500,
+      "status": "AVAILABLE"
+    },
+    {
+      "id": 3,
+      "plate": "AB 303 YY",
+      "brand": "Scania",
+      "model": "R500 V8",
+      "chassis_number": "YS2K1122334455667",
+      "year": 2023,
+      "current_km": 85000,
+      "status": "AVAILABLE"
+    }
+  ],
+  "trailers": [
+    {
+      "id": 1,
+      "plate": "AB 505 TR",
+      "type": "Frigorifer",
+      "model": "Schmitz Cargobull",
+      "chassis_number": "WK0987654321",
+      "capacity": "24 Ton / 33 Paleta",
+      "status": "AVAILABLE"
+    },
+    {
+      "id": 2,
+      "plate": "AB 606 KR",
+      "type": "Mushama (Tautliner)",
+      "model": "Krone Profi Liner",
+      "chassis_number": "WK0123456789",
+      "capacity": "25 Ton",
+      "status": "AVAILABLE"
+    },
+    {
+      "id": 3,
+      "plate": "AB 707 SW",
+      "type": "Mega",
+      "model": "Schwarzmuller",
+      "chassis_number": "WK0555666777",
+      "capacity": "100m3",
+      "status": "AVAILABLE"
+    }
+  ]
+}

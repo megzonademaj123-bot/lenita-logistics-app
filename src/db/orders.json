@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "order_number": "OD-01/2026",
+    "client_id": 1,
+    "driver_id": 1,
+    "truck_id": 1,
+    "trailer_id": 1,
+    "transport_type": "FTL",
+    "goods_desc": "Tekstile dhe veshje",
+    "loading_address": "Tirana, Albania",
+    "unloading_address": "Munich, Germany",
+    "loading_date": "2026-02-15",
+    "price": 2400,
+    "status": "FILLOI"
+  },
+  {
+    "id": 2,
+    "order_number": "OD-02/2026",
+    "client_id": 2,
+    "driver_id": 2,
+    "truck_id": 2,
+    "trailer_id": 2,
+    "transport_type": "LTL",
+    "goods_desc": "Pije freskuese",
+    "loading_address": "Prishtina, Kosovo",
+    "unloading_address": "Durres, Albania",
+    "loading_date": "2026-02-16",
+    "price": 350,
+    "status": "NË PRITJE"
+  }
+]

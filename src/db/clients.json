@@ -1,0 +1,35 @@
+[
+  {
+    "id": 1,
+    "name": "Alpha Trade Sh.p.k",
+    "contact_person": "Arben Duka",
+    "phone": "+355692055111",
+    "email": "arben@alphatrade.al",
+    "address": "Autostrada TR-DR, Km 5, Tiranë, Albania",
+    "spedicion_name": "Balkan Logistics",
+    "spedicion_email": "info@balkanlog.com",
+    "spedicion_phone": "+355684040500"
+  },
+  {
+    "id": 2,
+    "name": "Euro Foods GmbH",
+    "contact_person": "Hans Mueller",
+    "phone": "+491512345678",
+    "email": "h.mueller@eurofoods.de",
+    "address": "Industriestrasse 45, Munich, Germany",
+    "spedicion_name": "DHL Freight DE",
+    "spedicion_email": "dispatch.de@dhl.com",
+    "spedicion_phone": "+4989123999"
+  },
+  {
+    "id": 3,
+    "name": "Global Import Kosova",
+    "contact_person": "Valon Berisha",
+    "phone": "+38344123123",
+    "email": "valon@global-ks.com",
+    "address": "Zona Industriale, Prishtinë, Kosovo",
+    "spedicion_name": "",
+    "spedicion_email": "",
+    "spedicion_phone": ""
+  }
+]
