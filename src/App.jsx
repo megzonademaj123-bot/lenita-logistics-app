@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { supabase } from './supabaseClient.js';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
@@ -234,26 +235,30 @@ const App = () => {
   const [analyticsPage, setAnalyticsPage] = useState(1);
 
   // --- DATA ---
-  const loadState = (key, initial) => { 
-      const saved = localStorage.getItem(key); 
-      let data = saved ? JSON.parse(saved) : initial;
-      // Ensure is_active property exists for backward compatibility
-      if (Array.isArray(data)) {
-          data = data.map(item => ({ ...item, is_active: item.is_active !== undefined ? item.is_active : true }));
-      }
-      return data;
-  };
-  const [clients, setClients] = useState(() => loadState('clients', initialClients));
-  const [drivers, setDrivers] = useState(() => loadState('drivers', initialDrivers));
-  const [trucks, setTrucks] = useState(() => loadState('trucks', initialFleet.trucks));
-  const [trailers, setTrailers] = useState(() => loadState('trailers', initialFleet.trailers));
-  const [orders, setOrders] = useState(() => loadState('orders', initialOrders));
+  const [clients, setClients] = useState([]);
+  const [drivers, setDrivers] = useState([]);
+  const [trucks, setTrucks] = useState([]);
+  const [trailers, setTrailers] = useState([]);
+  const [orders, setOrders] = useState([]);
 
-  React.useEffect(() => localStorage.setItem('clients', JSON.stringify(clients)), [clients]);
-  React.useEffect(() => localStorage.setItem('drivers', JSON.stringify(drivers)), [drivers]);
-  React.useEffect(() => localStorage.setItem('trucks', JSON.stringify(trucks)), [trucks]);
-  React.useEffect(() => localStorage.setItem('trailers', JSON.stringify(trailers)), [trailers]);
-  React.useEffect(() => localStorage.setItem('orders', JSON.stringify(orders)), [orders]);
+  // Fetch all data from Supabase on initial load
+  React.useEffect(() => {
+    const fetchData = async () => {
+      const { data: clientsData } = await supabase.from('clients').select('*').order('name', { ascending: true });
+      const { data: driversData } = await supabase.from('drivers').select('*').order('name', { ascending: true });
+      const { data: trucksData } = await supabase.from('trucks').select('*').order('plate', { ascending: true });
+      const { data: trailersData } = await supabase.from('trailers').select('*').order('plate', { ascending: true });
+      const { data: ordersData } = await supabase.from('orders').select('*').order('id', { ascending: false });
+
+      if (clientsData) setClients(clientsData);
+      if (driversData) setDrivers(driversData);
+      if (trucksData) setTrucks(trucksData);
+      if (trailersData) setTrailers(trailersData);
+      if (ordersData) setOrders(ordersData);
+    };
+
+    fetchData();
+  }, []);
 
   // --- FILTERS & ANALYTICS ---
   const [orderSearch, setOrderSearch] = useState('');
@@ -350,122 +355,107 @@ const App = () => {
   };
 
   // --- CRUD/ACTION HANDLERS ---
-  const handleStatusChange = (orderId, newStatus) => {
-      const order = orders.find(o => o.id === orderId);
-      if (!order) return;
-      if (!canAdvanceStatus(order.status, newStatus)) { alert('Kujdes! Statusi nuk mund të kthehet mbrapa ose të ndryshohet në mënyrë të parregullt.'); return; }
-      
-      // FIXED FINISH LOGIC: Clear other modal states
-      if (newStatus === 'PERFUNDOI') { 
-          setFinishingOrder(order); 
-          setModalType(null); 
-          setSelectedEntity(null); 
-          setShowModal(true); 
-          return; 
-      }
-      
-      const today = new Date().toISOString().split('T')[0]; 
-      setOrders(prev => prev.map(o => { if (o.id === orderId) { const updates = { status: newStatus }; if (newStatus === 'FILLOI' && !o.start_date) updates.start_date = today; return { ...o, ...updates }; } return o; }));
-      if (newStatus === 'DESHTOI') { updateResourceStatus(order.driver_id, order.truck_id, order.trailer_id, 'AVAILABLE'); } else { updateResourceStatus(order.driver_id, order.truck_id, order.trailer_id, 'BUSY'); }
+  const handleStatusChange = async (orderId, newStatus) => {
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return;
+    if (!canAdvanceStatus(order.status, newStatus)) { alert('Kujdes! Statusi nuk mund të kthehet mbrapa ose të ndryshohet në mënyrë të parregullt.'); return; }
+    
+    if (newStatus === 'PERFUNDOI') {
+      setFinishingOrder(order);
+      setShowModal(true);
+      return;
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const updates = { status: newStatus };
+    if (newStatus === 'FILLOI' && !order.start_date) updates.start_date = today;
+
+    const { data, error } = await supabase.from('orders').update(updates).eq('id', orderId).select();
+    if (!error && data) {
+      setOrders(prev => prev.map(o => o.id === data[0].id ? data[0] : o));
+      // Update resource statuses in parallel
+      const resourceUpdates = { status: newStatus === 'DESHTOI' ? 'AVAILABLE' : 'BUSY' };
+      Promise.all([
+        supabase.from('drivers').update(resourceUpdates).eq('id', order.driver_id),
+        supabase.from('trucks').update(resourceUpdates).eq('id', order.truck_id),
+        supabase.from('trailers').update(resourceUpdates).eq('id', order.trailer_id)
+      ]).then(() => {
+        // Optionally refetch or update local state for resources
+      });
+    }
   };
   
-  const completeOrder = (e) => { 
-      e.preventDefault(); 
-      if (!finishingOrder) return; 
-      const formData = new FormData(e.target); 
-      const kmKosovo = parseFloat(formData.get('km_kosovo') || 0); 
-      const kmInternational = parseFloat(formData.get('km_international') || 0); 
-      const skipFuel = formData.get('skip_fuel') === 'on';
-      const totalKm = kmKosovo + kmInternational; 
-      const fuelCost = skipFuel ? 0 : (totalKm * 0.38); // Fuel volume in Liters
-      const today = new Date().toISOString().split('T')[0]; 
-      
-      setOrders(prev => prev.map(o => { 
-          if (o.id === finishingOrder.id) { 
-              return { 
-                  ...o, 
-                  status: 'PERFUNDOI', 
-                  end_date: today, 
-                  km_kosovo: kmKosovo, 
-                  km_international: kmInternational, 
-                  total_km: totalKm, 
-                  fuel_cost: fuelCost,
-                  skip_fuel: skipFuel
-              }; 
-          } 
-          return o; 
-      })); 
+  const completeOrder = async (e) => {
+    e.preventDefault();
+    if (!finishingOrder) return;
+    const formData = new FormData(e.target);
+    const kmKosovo = parseFloat(formData.get('km_kosovo') || 0);
+    const kmInternational = parseFloat(formData.get('km_international') || 0);
+    const skipFuel = formData.get('skip_fuel') === 'on';
+    const totalKm = kmKosovo + kmInternational;
+    const fuelCost = skipFuel ? 0 : (totalKm * 0.38);
+    const today = new Date().toISOString().split('T')[0];
 
-      // UPDATE TRUCK KM AUTOMATICALLY
+    const orderUpdates = {
+      status: 'PERFUNDOI',
+      end_date: today,
+      km_kosovo: kmKosovo,
+      km_international: kmInternational,
+      total_km: totalKm,
+      fuel_cost: fuelCost,
+      skip_fuel: skipFuel
+    };
+
+    const { data: updatedOrder, error } = await supabase.from('orders').update(orderUpdates).eq('id', finishingOrder.id).select();
+
+    if (!error && updatedOrder) {
+      setOrders(prev => prev.map(o => o.id === updatedOrder[0].id ? updatedOrder[0] : o));
+      
+      const resourceUpdates = { status: 'AVAILABLE' };
       if (finishingOrder.truck_id) {
-          setTrucks(prev => prev.map(t => {
-              if (t.id === finishingOrder.truck_id) {
-                  return {
-                      ...t,
-                      current_km: (parseFloat(t.current_km) || 0) + totalKm,
-                      status: 'AVAILABLE' // Free up the truck
-                  };
-              }
-              return t;
-          }));
+          const truck = trucks.find(t => t.id === finishingOrder.truck_id);
+          if (truck) {
+            resourceUpdates.current_km = (parseFloat(truck.current_km) || 0) + totalKm;
+          }
       }
 
-      // Update other resources status
-      updateResourceStatus(finishingOrder.driver_id, finishingOrder.truck_id, finishingOrder.trailer_id, 'AVAILABLE'); 
-      setFinishingOrder(null); 
-      setShowModal(false); 
+      Promise.all([
+        supabase.from('drivers').update({ status: 'AVAILABLE' }).eq('id', finishingOrder.driver_id),
+        supabase.from('trucks').update(resourceUpdates).eq('id', finishingOrder.truck_id),
+        supabase.from('trailers').update({ status: 'AVAILABLE' }).eq('id', finishingOrder.trailer_id)
+      ]).then(() => {
+        // Refetch trucks to get updated KM
+         supabase.from('trucks').select('*').then(({data}) => setTrucks(data));
+      });
+    }
+    setFinishingOrder(null);
+    setShowModal(false);
   };
 
-  const handleSubmitClient = (e) => { e.preventDefault(); const formData = new FormData(e.target); const d = { name: formData.get('name'), contact_person: formData.get('contact_person'), phone: formData.get('phone'), email: formData.get('email'), address: formData.get('address'), spedicion_name: formData.get('spedicion_name'), spedicion_email: formData.get('spedicion_email'), spedicion_phone: formData.get('spedicion_phone'), is_active: true }; if (isEditing && selectedEntity) { setClients(clients.map(c => c.id === selectedEntity.data.id ? { ...c, ...d } : c)); } else { setClients([...clients, { id: clients.length + 1, ...d }]); } setShowModal(false); setIsEditing(false); setSelectedEntity(null); };
-  const handleSubmitDriver = (e) => { e.preventDefault(); const formData = new FormData(e.target); const d = { name: formData.get('name'), license_number: formData.get('license_number'), phone: formData.get('phone'), age: formData.get('age'), salary: formData.get('salary'), status: isEditing ? selectedEntity.data.status : 'AVAILABLE', is_active: true }; if (isEditing && selectedEntity) { setDrivers(drivers.map(x => x.id === selectedEntity.data.id ? { ...x, ...d } : x)); } else { setDrivers([...drivers, { id: drivers.length + 1, ...d }]); } setShowModal(false); setIsEditing(false); setSelectedEntity(null); };
-  const handleSubmitTruck = (e) => { e.preventDefault(); const formData = new FormData(e.target); const d = { plate: formData.get('plate'), brand: formData.get('brand'), model: formData.get('model'), chassis_number: formData.get('chassis_number'), current_km: formData.get('current_km'), year: formData.get('year'), status: isEditing ? selectedEntity.data.status : 'AVAILABLE', is_active: true }; if (isEditing && selectedEntity) { setTrucks(trucks.map(x => x.id === selectedEntity.data.id ? { ...x, ...d } : x)); } else { setTrucks([...trucks, { id: trucks.length + 1, ...d }]); } setShowModal(false); setIsEditing(false); setSelectedEntity(null); };
-  const handleSubmitTrailer = (e) => { e.preventDefault(); const formData = new FormData(e.target); const d = { plate: formData.get('plate'), chassis_number: formData.get('chassis_number'), model: formData.get('model'), type: formData.get('type'), capacity: formData.get('capacity'), status: isEditing ? selectedEntity.data.status : 'AVAILABLE', is_active: true }; if (isEditing && selectedEntity) { setTrailers(trailers.map(x => x.id === selectedEntity.data.id ? { ...x, ...d } : x)); } else { setTrailers([...trailers, { id: trailers.length + 1, ...d }]); } setShowModal(false); setIsEditing(false); setSelectedEntity(null); };
-  const handleSubmitOrder = (e) => { e.preventDefault(); const formData = new FormData(e.target); const loadAddr = formData.get('loading_city') ? `${formData.get('loading_city')}, ${formData.get('loading_country')}` : (isEditing ? selectedEntity.data.loading_address : ''); const unloadAddr = formData.get('unloading_city') ? `${formData.get('unloading_city')}, ${formData.get('unloading_country')}` : (isEditing ? selectedEntity.data.unloading_address : ''); const d = { client_id: parseInt(formData.get('client_id')), driver_id: parseInt(formData.get('driver_id')), truck_id: parseInt(formData.get('truck_id')), trailer_id: parseInt(formData.get('trailer_id')), transport_type: formData.get('transport_type'), goods_desc: formData.get('goods_desc'), loading_address: loadAddr, unloading_address: unloadAddr, loading_date: formData.get('loading_date'), price: parseFloat(formData.get('price')) }; if (isEditing && selectedEntity) { setOrders(orders.map(o => o.id === selectedEntity.data.id ? { ...o, ...d } : o)); } else { const nextId = orders.length + 1; const year = new Date().getFullYear(); const formattedId = `OD-${String(nextId).padStart(2, '0')}/${year}`; const newOrder = { id: orders.length + 1, order_number: formattedId, ...d, status: 'NË PRITJE', start_date: null, end_date: null }; setOrders([...orders, newOrder]); updateResourceStatus(newOrder.driver_id, newOrder.truck_id, newOrder.trailer_id, 'BUSY'); } setShowModal(false); setIsEditing(false); setSelectedEntity(null); setLoadingCountry(''); setUnloadingCountry(''); };
+  const handleSubmitClient = async (e) => { e.preventDefault(); const formData = new FormData(e.target); const d = { name: formData.get('name'), contact_person: formData.get('contact_person'), phone: formData.get('phone'), email: formData.get('email'), address: formData.get('address'), spedicion_name: formData.get('spedicion_name'), spedicion_email: formData.get('spedicion_email'), spedicion_phone: formData.get('spedicion_phone') }; if (isEditing) { const { data } = await supabase.from('clients').update(d).eq('id', selectedEntity.data.id).select(); setClients(clients.map(c => c.id === data[0].id ? data[0] : c)); } else { const { data } = await supabase.from('clients').insert(d).select(); setClients([...clients, data[0]]); } setShowModal(false); };
+  const handleSubmitDriver = async (e) => { e.preventDefault(); const formData = new FormData(e.target); const d = { name: formData.get('name'), license_number: formData.get('license_number'), phone: formData.get('phone'), age: formData.get('age'), salary: formData.get('salary') }; if (isEditing) { const { data } = await supabase.from('drivers').update(d).eq('id', selectedEntity.data.id).select(); setDrivers(drivers.map(x => x.id === data[0].id ? data[0] : x)); } else { const { data } = await supabase.from('drivers').insert(d).select(); setDrivers([...drivers, data[0]]); } setShowModal(false); };
+  const handleSubmitTruck = async (e) => { e.preventDefault(); const formData = new FormData(e.target); const d = { plate: formData.get('plate'), brand: formData.get('brand'), model: formData.get('model'), chassis_number: formData.get('chassis_number'), current_km: formData.get('current_km'), year: formData.get('year') }; if (isEditing) { const { data } = await supabase.from('trucks').update(d).eq('id', selectedEntity.data.id).select(); setTrucks(trucks.map(x => x.id === data[0].id ? data[0] : x)); } else { const { data } = await supabase.from('trucks').insert(d).select(); setTrucks([...trucks, data[0]]); } setShowModal(false); };
+  const handleSubmitTrailer = async (e) => { e.preventDefault(); const formData = new FormData(e.target); const d = { plate: formData.get('plate'), chassis_number: formData.get('chassis_number'), model: formData.get('model'), type: formData.get('type'), capacity: formData.get('capacity') }; if (isEditing) { const { data } = await supabase.from('trailers').update(d).eq('id', selectedEntity.data.id).select(); setTrailers(trailers.map(x => x.id === data[0].id ? data[0] : x)); } else { const { data } = await supabase.from('trailers').insert(d).select(); setTrailers([...trailers, data[0]]); } setShowModal(false); };
+  const handleSubmitOrder = async (e) => { e.preventDefault(); const formData = new FormData(e.target); const loadAddr = `${formData.get('loading_city')}, ${formData.get('loading_country')}`; const unloadAddr = `${formData.get('unloading_city')}, ${formData.get('unloading_country')}`; const d = { client_id: parseInt(formData.get('client_id')), driver_id: parseInt(formData.get('driver_id')), truck_id: parseInt(formData.get('truck_id')), trailer_id: parseInt(formData.get('trailer_id')), transport_type: formData.get('transport_type'), goods_desc: formData.get('goods_desc'), loading_address: loadAddr, unloading_address: unloadAddr, loading_date: formData.get('loading_date'), price: parseFloat(formData.get('price')) }; if (isEditing) { const { data } = await supabase.from('orders').update(d).eq('id', selectedEntity.data.id).select(); setOrders(orders.map(o => o.id === data[0].id ? data[0] : o)); } else { const { data: allOrders } = await supabase.from('orders').select('id'); const nextId = allOrders.length + 1; const year = new Date().getFullYear(); d.order_number = `OD-${String(nextId).padStart(2, '0')}/${year}`; const { data } = await supabase.from('orders').insert(d).select(); setOrders([...orders, data[0]]); const resourceUpdates = { status: 'BUSY' }; Promise.all([ supabase.from('drivers').update(resourceUpdates).eq('id', d.driver_id), supabase.from('trucks').update(resourceUpdates).eq('id', d.truck_id), supabase.from('trailers').update(resourceUpdates).eq('id', d.trailer_id) ]); } setShowModal(false); };
 
-  // --- ARCHIVE HANDLERS ---
-  const hasLinkedOrders = (id, type) => {
-      if (type === 'client') return orders.some(o => o.client_id === id);
-      if (type === 'driver') return orders.some(o => o.driver_id === id);
-      if (type === 'truck') return orders.some(o => o.truck_id === id);
-      if (type === 'trailer') return orders.some(o => o.trailer_id === id);
-      return false;
-  };
-
-  const handleArchiveClient = (e, id) => { 
-      e.stopPropagation(); 
-      // if (hasLinkedOrders(id, 'client')) { alert("Vëmendje: Ky klient ka porosi të lidhura. Do të arkivohet por historiku ruhet."); }
-      if (window.confirm('A jeni i sigurt që doni ta arkivoni këtë klient?')) { 
-          setClients(clients.map(c => c.id === id ? { ...c, is_active: false } : c)); 
-      } 
-  };
-  const handleArchiveDriver = (e, id) => { 
-      e.stopPropagation(); 
-      // if (hasLinkedOrders(id, 'driver')) { alert("Vëmendje: Ky shofer ka porosi të lidhura. Do të arkivohet por historiku ruhet."); }
-      if (window.confirm('A jeni i sigurt që doni ta arkivoni këtë shofer?')) { 
-          setDrivers(drivers.map(d => d.id === id ? { ...d, is_active: false } : d)); 
-      } 
-  };
-  const handleArchiveTruck = (id) => { 
-      if (window.confirm('A jeni i sigurt që doni ta arkivoni këtë kamion?')) { 
-          setTrucks(trucks.map(t => t.id === id ? { ...t, is_active: false } : t)); 
-      } 
-  };
-  const handleArchiveTrailer = (id) => { 
-      if (window.confirm('A jeni i sigurt që doni ta arkivoni këtë rimorkio?')) { 
-          setTrailers(trailers.map(t => t.id === id ? { ...t, is_active: false } : t)); 
-      } 
-  };
+  const handleArchiveClient = async (e, id) => { e.stopPropagation(); if (window.confirm('A jeni i sigurt?')) { const { data } = await supabase.from('clients').update({ is_active: false }).eq('id', id).select(); setClients(clients.map(c => c.id === data[0].id ? data[0] : c)); } };
+  const handleArchiveDriver = async (e, id) => { e.stopPropagation(); if (window.confirm('A jeni i sigurt?')) { const { data } = await supabase.from('drivers').update({ is_active: false }).eq('id', id).select(); setDrivers(drivers.map(d => d.id === data[0].id ? data[0] : d)); } };
+  const handleArchiveTruck = async (id) => { if (window.confirm('A jeni i sigurt?')) { const { data } = await supabase.from('trucks').update({ is_active: false }).eq('id', id).select(); setTrucks(trucks.map(t => t.id === data[0].id ? data[0] : t)); } };
+  const handleArchiveTrailer = async (id) => { if (window.confirm('A jeni i sigurt?')) { const { data } = await supabase.from('trailers').update({ is_active: false }).eq('id', id).select(); setTrailers(trailers.map(t => t.id === data[0].id ? data[0] : t)); } };
   
-  const handleRestore = (id, type) => {
-      if (window.confirm('A jeni i sigurt që doni ta riktheni (aktivizoni)?')) {
-          if (type === 'client') setClients(clients.map(c => c.id === id ? { ...c, is_active: true } : c));
-          if (type === 'driver') setDrivers(drivers.map(d => d.id === id ? { ...d, is_active: true } : d));
-          if (type === 'truck') setTrucks(trucks.map(t => t.id === id ? { ...t, is_active: true } : t));
-          if (type === 'trailer') setTrailers(trailers.map(t => t.id === id ? { ...t, is_active: true } : t));
+  const handleRestore = async (id, type) => {
+    if (window.confirm('A jeni i sigurt?')) {
+      const tableName = `${type}s`;
+      const { data } = await supabase.from(tableName).update({ is_active: true }).eq('id', id).select();
+      if (data) {
+        const setter = { clients: setClients, drivers: setDrivers, trucks: setTrucks, trailers: setTrailers }[type];
+        const state = { clients, drivers, trucks, trailers }[type];
+        setter(state.map(item => item.id === data[0].id ? data[0] : item));
       }
+    }
   };
 
-  const handleDeleteOrder = (id) => { if(window.confirm('A jeni i sigurt?')) { const o = orders.find(x => x.id === id); if (o && o.status !== 'PERFUNDOI') { updateResourceStatus(o.driver_id, o.truck_id, o.trailer_id, 'AVAILABLE'); } setOrders(orders.filter(x => x.id !== id)); } };
+  const handleDeleteOrder = async (id) => { if(window.confirm('A jeni i sigurt?')) { const o = orders.find(x => x.id === id); if (o && o.status !== 'PERFUNDOI') { Promise.all([ supabase.from('drivers').update({status: 'AVAILABLE'}).eq('id', o.driver_id), supabase.from('trucks').update({status: 'AVAILABLE'}).eq('id', o.truck_id), supabase.from('trailers').update({status: 'AVAILABLE'}).eq('id', o.trailer_id) ]); } await supabase.from('orders').delete().eq('id', id); setOrders(orders.filter(x => x.id !== id)); } };
   const handleFailOrder = (id) => { if(window.confirm('Shëno si Dështuar?')) { handleStatusChange(id, 'DESHTOI'); } };
 
   // --- NEW UI HELPERS ---
